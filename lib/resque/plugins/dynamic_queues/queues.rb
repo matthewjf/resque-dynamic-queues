@@ -3,19 +3,16 @@ module Resque
     module DynamicQueues
       module Queues
 
-        # Returns a list of queues to use when searching for a job.
-        #
-        # A splat ("*") means you want every queue (in alpha order) - this
-        # can be useful for dynamically adding new queues.
-        #
-        # The splat can also be used as a wildcard within a queue name,
-        # e.g. "*high*", and negation can be indicated with a prefix of "!"
-        #
-        # An @key can be used to dynamically look up the queue list for key from redis.
-        # If no key is supplied, it defaults to the worker's hostname, and wildcards
-        # and negations can be used inside this dynamic queue list.   Set the queue
-        # list for a key with Resque.set_dynamic_queue(key, ["q1", "q2"]
-        #
+        class DynamicPattern
+          attr_reader :queue, :negated, :pattern
+          def initialize(queue)
+            @queue = queue
+            @negated = queue =~ /^!/
+            patrstr = (@negated ? queue[1..-1] : queue).gsub(/\*/, ".*")
+            @pattern = /^#{patrstr}$/
+          end
+        end
+
         def queues_with_dynamic
           queue_names = @queues.dup
 
@@ -24,39 +21,32 @@ module Resque
           real_queues = Resque.queues.sort
           matched_queues = []
 
-          while q = queue_names.shift
-            q = q.to_s
+          dynamic_queues = queue_names.map { |q| DynamicPattern.new q }
 
-            if q =~ /^(!)?@(.*)/
-              key = $2.strip
-              key = hostname if key.size == 0
+          sort_hash = {}
 
-              add_queues = Resque.get_dynamic_queue(key)
-              add_queues.map! { |q| q.gsub!(/^!/, '') || q.gsub!(/^/, '!') } if $1
+          stable_sort_constant = 10**(real_queues.length.to_s.length)
 
-              queue_names.concat(add_queues)
-              next
+          real_queues.select.with_index do |q, i|
+            negated = false
+            matched = false
+            max_length = 0
+            match_index = -1
+            dynamic_queues.each.with_index do |dq, j|
+              if dq.pattern =~ q
+                negated ||= dq.negated
+                matched = true
+                if dq.queue.length > max_length
+                  match_index = (j * stable_sort_constant) + i
+                  max_length = dq.queue.length
+                end
+              end
             end
-
-            if q =~ /^!/
-              negated = true
-              q = q[1..-1]
-            end
-
-            patstr = q.gsub(/\*/, ".*")
-            pattern = /^#{patstr}$/
-            if negated
-              matched_queues -= matched_queues.grep(pattern)
-            else
-              matches = real_queues.grep(/^#{pattern}$/)
-              matches = [q] if matches.size == 0 && q == patstr
-              matched_queues.concat(matches)
-            end
+            sort_hash[q] = match_index
+            matched && !negated
           end
-
-          return matched_queues.uniq
+          .sort_by { |q| sort_hash[q] }
         end
-
 
         def self.included(receiver)
           receiver.class_eval do

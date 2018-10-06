@@ -21,7 +21,7 @@ Gem::Specification.new do |s|
   s.require_paths = ["lib"]
 
   s.add_dependency("resque", '~> 1.10')
-
+  s.add_development_dependency('pry')
   s.add_development_dependency('rake')
   s.add_development_dependency('rspec', '~> 2.5')
   s.add_development_dependency('rack-test', '~> 0.5.4')
@@ -30,4 +30,3 @@ Gem::Specification.new do |s|
   s.add_development_dependency('json')
 
 end
-
